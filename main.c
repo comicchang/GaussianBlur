@@ -39,8 +39,8 @@ int calcOffset(int width, int height, int x, int y) {
 uchar *bilinearInterpolation(const uchar *image, int width, int height,
                              int newWidth, int newHeight) {
   int channels = CHANNELS;
-  float xRatio = (float)width / newWidth;
-  float yRatio = (float)height / newHeight;
+  float xRatio = (float)(width - 1) / (newWidth - 1);
+  float yRatio = (float)(height - 1) / (newHeight - 1);
 
   uchar *outputImage =
       (uchar *)malloc(newWidth * newHeight * channels * sizeof(uchar));
@@ -54,16 +54,16 @@ uchar *bilinearInterpolation(const uchar *image, int width, int height,
       float alpha = originalX - x1;
       float beta = originalY - y1;
 
-      int leftTopOffset = calcOffsetWithClamp(width, height, x1, y1);
+      int inputOffset = calcOffset(width, height, x1, y1);
       int outputOffset = calcOffset(newWidth, newHeight, newX, newY);
 
       for (int channel = 0; channel < channels; channel++) {
-        int offset = leftTopOffset + channel;
+        int offset = inputOffset + channel;
 
         uchar leftTop = image[offset];
         uchar rightTop = image[offset + channels];
         uchar leftBottom = image[offset + width * channels];
-        uchar rightBottom = image[offset + (width + 1) * channels];
+        uchar rightBottom = image[offset + width * channels + channels];
 
         float interpolatedValue =
             (1 - alpha) * (1 - beta) * leftTop + alpha * (1 - beta) * rightTop +
@@ -257,7 +257,7 @@ void processImage(const char *inputPath, const char *outputPath, float sigma) {
     // Save the resized image
     // filename = "output + sigma + .png"
     char filename[1024];
-    snprintf(filename, 1024, "%s_%g.png", outputPath, sigma);
+    snprintf(filename, 1024, "%s_sigma_%g.png", outputPath, sigma);
     stbi_write_png(filename, width, height, CHANNELS, image, width * CHANNELS);
   }
 
@@ -287,7 +287,7 @@ void processImage(const char *inputPath, const char *outputPath, float sigma) {
 int main() {
   const char *inputPath = "../input.png";
   const char *outputPath = "output.png";
-  float sigma = 30.0f;
+  float sigma = 80.0f;
 
   processImage(inputPath, outputPath, sigma);
 
