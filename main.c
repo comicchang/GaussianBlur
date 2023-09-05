@@ -39,20 +39,28 @@ int calcOffset(int width, int height, int x, int y) {
 uchar *bilinearInterpolation(const uchar *image, int width, int height,
                              int newWidth, int newHeight) {
   int channels = CHANNELS;
-  float xRatio = (float)(width - 1) / (newWidth - 1);
-  float yRatio = (float)(height - 1) / (newHeight - 1);
+  float xRatio = (float)width / newWidth;
+  float yRatio = (float)height / newHeight;
 
   uchar *outputImage =
       (uchar *)malloc(newWidth * newHeight * channels * sizeof(uchar));
 
   for (int newY = 0; newY < newHeight; newY++) {
+    float originalY = (newY + 0.5) * yRatio - 0.5;
+    int y1 = (int)originalY;
+    float beta = originalY - y1;
+    if (y1 >= height - 1) {
+      y1 = height - 1;
+      beta = 0;
+    }
     for (int newX = 0; newX < newWidth; newX++) {
-      float originalX = newX * xRatio;
-      float originalY = newY * yRatio;
+      float originalX = (newX + 0.5) * xRatio - 0.5;
       int x1 = (int)originalX;
-      int y1 = (int)originalY;
       float alpha = originalX - x1;
-      float beta = originalY - y1;
+      if (x1 >= width - 1) {
+        x1 = width - 1;
+        alpha = 0;
+      }
 
       int inputOffset = calcOffset(width, height, x1, y1);
       int outputOffset = calcOffset(newWidth, newHeight, newX, newY);

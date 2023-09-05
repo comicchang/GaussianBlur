@@ -21,4 +21,6 @@ target_include_directories(GaussianBlur
         ${PROJECT_SOURCE_DIR}/stb/
 )
 
+target_link_libraries(GaussianBlur m)
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
