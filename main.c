@@ -1,181 +1,192 @@
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "stb_image.h"
-#include "stb_image_write.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+#include "stb_image.h"
+#include "stb_image_write.h"
 
 #define CHANNELS 3
 
 typedef unsigned char uchar;
 
-uchar *bilinearInterpolation(const uchar *image, int width, int height,
-                             int newWidth, int newHeight);
-void processImage(const char *inputPath, const char *outputPath, float radius);
-void gaussianBlur(uchar *image, int width, int height, double sigma);
-void convolutionX(const uchar *inputImage, uchar *outputImage, int width,
-                  int height, const float *kernel, int kernelSize);
-void convolutionY(const uchar *inputImage, uchar *outputImage, int width,
-                  int height, const float *kernel, int kernelSize);
+uchar* bilinearInterpolation(const uchar* image, int width, int height, int newWidth, int newHeight);
+void processImage(const char* inputPath, const char* outputPath, float radius);
+void gaussianBlur(uchar* image, int width, int height, double sigma);
+void convolutionX(
+    const uchar* inputImage, uchar* outputImage, int width, int height, const float* kernel, int kernelSize);
+void convolutionY(
+    const uchar* inputImage, uchar* outputImage, int width, int height, const float* kernel, int kernelSize);
 
-int calcOffsetWithClamp(int width, int height, int x, int y) {
-  // Clamp x and y values to ensure they are within image bounds
-  x = fmax(0, fmin(x, width - 1));
-  y = fmax(0, fmin(y, height - 1));
+int calcOffsetWithClamp(int width, int height, int x, int y)
+{
+    // Clamp x and y values to ensure they are within image bounds
+    x = fmax(0, fmin(x, width - 1));
+    y = fmax(0, fmin(y, height - 1));
 
-  // Calculate the offset of the pixel
-  int offset = (y * width + x) * CHANNELS;
+    // Calculate the offset of the pixel
+    int offset = (y * width + x) * CHANNELS;
 
-  // Return the offset
-  return offset;
+    // Return the offset
+    return offset;
 }
 
-int calcOffset(int width, int height, int x, int y) {
-  // Calculate the offset of the pixel
-  return (y * width + x) * CHANNELS;
+int calcOffset(int width, int height, int x, int y)
+{
+    // Calculate the offset of the pixel
+    return (y * width + x) * CHANNELS;
 }
 
-uchar *bilinearInterpolation(const uchar *image, int width, int height,
-                             int newWidth, int newHeight) {
-  int channels = CHANNELS;
-  float xRatio = (float)width / newWidth;
-  float yRatio = (float)height / newHeight;
+uchar* bilinearInterpolation(const uchar* image, int width, int height, int newWidth, int newHeight)
+{
+    int channels = CHANNELS;
+    float xRatio = (float)width / newWidth;
+    float yRatio = (float)height / newHeight;
 
-  uchar *outputImage =
-      (uchar *)malloc(newWidth * newHeight * channels * sizeof(uchar));
+    uchar* outputImage = (uchar*)malloc(newWidth * newHeight * channels * sizeof(uchar));
 
-  for (int newY = 0; newY < newHeight; newY++) {
-    float originalY = (newY + 0.5) * yRatio - 0.5;
-    int y1 = (int)originalY;
-    float beta = originalY - y1;
-    if (y1 >= height - 1) {
-      y1 = height - 1;
-      beta = 0;
-    }
-    for (int newX = 0; newX < newWidth; newX++) {
-      float originalX = (newX + 0.5) * xRatio - 0.5;
-      int x1 = (int)originalX;
-      float alpha = originalX - x1;
-      if (x1 >= width - 1) {
-        x1 = width - 1;
-        alpha = 0;
-      }
-
-      int inputOffset = calcOffset(width, height, x1, y1);
-      int outputOffset = calcOffset(newWidth, newHeight, newX, newY);
-
-      for (int channel = 0; channel < channels; channel++) {
-        int offset = inputOffset + channel;
-
-        uchar leftTop = image[offset];
-        uchar rightTop = image[offset + channels];
-        uchar leftBottom = image[offset + width * channels];
-        uchar rightBottom = image[offset + width * channels + channels];
-
-        float interpolatedValue =
-            (1 - alpha) * (1 - beta) * leftTop + alpha * (1 - beta) * rightTop +
-            (1 - alpha) * beta * leftBottom + alpha * beta * rightBottom;
-
-        outputImage[outputOffset + channel] = round(interpolatedValue);
-      }
-    }
-  }
-
-  return outputImage;
-}
-
-void fill1DGaussianKernel(float *kernel, int size, float sigma) {
-  // 计算高斯核的中心位置
-  int center = size / 2;
-
-  // 计算高斯分布的标准差的平方
-  float sigma2 = sigma * sigma;
-
-  // 计算高斯核的总和，用于归一化
-  float sum = 0.0f;
-
-  // 填充高斯核
-  for (int i = 0; i < size; i++) {
-    // 计算当前位置与中心位置的差值
-    int offset = i - center;
-
-    // 计算高斯核的值
-    float value = exp(-(offset * offset) / (2 * sigma2));
-
-    // 将值存储到高斯核数组中
-    kernel[i] = value;
-
-    // 累加高斯核的值
-    sum += value;
-  }
-
-  // 归一化高斯核
-  for (int i = 0; i < size; i++) {
-    kernel[i] /= sum;
-  }
-
-  // printf("Gaussian kernel: ");
-  // for (int i = 0; i < kernelSize; i++) {
-  //   printf("%f ", kernel[i]);
-  // }
-  // printf("\n");
-}
-
-void convolutionY(const uchar *inputImage, uchar *outputImage, int width,
-                  int height, const float *kernel, int kernelSize) {
-  int channels = CHANNELS;
-  int kernelRadius = kernelSize / 2;
-
-  for (int y = 0; y < height; y++) {
-    for (int x = 0; x < width; x++) {
-      float sum[channels];
-      memset(sum, 0, sizeof(float) * channels);
-
-      for (int i = 0; i < kernelSize; i++) {
-        int offsetY = i - kernelRadius;
-        int inputOffset = calcOffsetWithClamp(width, height, x, y + offsetY);
-
-        for (int channel = 0; channel < channels; channel++) {
-          sum[channel] += inputImage[inputOffset + channel] * kernel[i];
+    for (int newY = 0; newY < newHeight; newY++) {
+        float originalY = (newY + 0.5) * yRatio - 0.5;
+        int mappedY = (int)originalY;
+        float beta = originalY - mappedY;
+        if (mappedY >= height - 1) {
+            mappedY = height - 1;
+            beta = 0;
+        } else if (mappedY < 0) {
+            mappedY = 0;
+            beta = 0;
         }
-      }
+        for (int newX = 0; newX < newWidth; newX++) {
+            float originalX = (newX + 0.5) * xRatio - 0.5;
+            int mappedX = (int)originalX;
+            float alpha = originalX - mappedX;
+            if (mappedX >= width - 1) {
+                mappedX = width - 1;
+                alpha = 0;
+            } else if (mappedX < 0) {
+                mappedX = 0;
+                alpha = 0;
+            }
 
-      uchar *output = outputImage + calcOffset(width, height, x, y);
-      for (int channel = 0; channel < channels; channel++) {
-        output[channel] = round(sum[channel]);
-      }
+            int outputOffset = calcOffset(newWidth, newHeight, newX, newY);
+
+            int inputOffsetLeftTop = calcOffsetWithClamp(width, height, mappedX, mappedY);
+            int inputOffsetRightTop = calcOffsetWithClamp(width, height, mappedX + 1, mappedY);
+            int inputOffsetLeftBottom = calcOffsetWithClamp(width, height, mappedX, mappedY + 1);
+            int inputOffsetRightBottom = calcOffsetWithClamp(width, height, mappedX + 1, mappedY + 1);
+
+            for (int channel = 0; channel < channels; channel++) {
+                uchar leftTop = image[inputOffsetLeftTop + channel];
+                uchar rightTop = image[inputOffsetRightTop + channel];
+                uchar leftBottom = image[inputOffsetLeftBottom + channel];
+                uchar rightBottom = image[inputOffsetRightBottom + channel];
+
+                float interpolatedValue = (1 - alpha) * (1 - beta) * leftTop + alpha * (1 - beta) * rightTop +
+                                          (1 - alpha) * beta * leftBottom + alpha * beta * rightBottom;
+
+                outputImage[outputOffset + channel] = round(interpolatedValue);
+            }
+        }
     }
-  }
+
+    return outputImage;
 }
 
-void convolutionX(const uchar *inputImage, uchar *outputImage, int width,
-                  int height, const float *kernel, int kernelSize) {
-  int channels = CHANNELS;
-  int kernelRadius = kernelSize / 2;
+void fill1DGaussianKernel(float* kernel, int size, float sigma)
+{
+    // 计算高斯核的中心位置
+    int center = size / 2;
 
-  for (int y = 0; y < height; y++) {
-    for (int x = 0; x < width; x++) {
-      float sum[channels];
-      for (int channel = 0; channel < channels; channel++) {
-        sum[channel] = 0;
-      }
+    // 计算高斯分布的标准差的平方
+    float sigma2 = sigma * sigma;
 
-      for (int i = 0; i < kernelSize; i++) {
-        int offsetX = i - kernelRadius;
-        int inputOffset = calcOffsetWithClamp(width, height, x + offsetX, y);
+    // 计算高斯核的总和，用于归一化
+    float sum = 0.0f;
 
-        for (int channel = 0; channel < channels; channel++) {
-          sum[channel] += inputImage[inputOffset + channel] * kernel[i];
-        }
-      }
+    // 填充高斯核
+    for (int i = 0; i < size; i++) {
+        // 计算当前位置与中心位置的差值
+        int offset = i - center;
 
-      uchar *output = outputImage + calcOffset(width, height, x, y);
-      for (int channel = 0; channel < channels; channel++) {
-        output[channel] = round(sum[channel]);
-      }
+        // 计算高斯核的值
+        float value = exp(-(offset * offset) / (2 * sigma2));
+
+        // 将值存储到高斯核数组中
+        kernel[i] = value;
+
+        // 累加高斯核的值
+        sum += value;
     }
-  }
+
+    // 归一化高斯核
+    for (int i = 0; i < size; i++) {
+        kernel[i] /= sum;
+    }
+
+    // printf("Gaussian kernel: ");
+    // for (int i = 0; i < kernelSize; i++) {
+    //   printf("%f ", kernel[i]);
+    // }
+    // printf("\n");
+}
+
+void convolutionY(
+    const uchar* inputImage, uchar* outputImage, int width, int height, const float* kernel, int kernelSize)
+{
+    int channels = CHANNELS;
+    int kernelRadius = kernelSize / 2;
+
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            float sum[channels];
+            memset(sum, 0, sizeof(float) * channels);
+
+            for (int i = 0; i < kernelSize; i++) {
+                int offsetY = i - kernelRadius;
+                int inputOffset = calcOffsetWithClamp(width, height, x, y + offsetY);
+
+                for (int channel = 0; channel < channels; channel++) {
+                    sum[channel] += inputImage[inputOffset + channel] * kernel[i];
+                }
+            }
+
+            uchar* output = outputImage + calcOffset(width, height, x, y);
+            for (int channel = 0; channel < channels; channel++) {
+                output[channel] = round(sum[channel]);
+            }
+        }
+    }
+}
+
+void convolutionX(
+    const uchar* inputImage, uchar* outputImage, int width, int height, const float* kernel, int kernelSize)
+{
+    int channels = CHANNELS;
+    int kernelRadius = kernelSize / 2;
+
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            float sum[channels];
+            for (int channel = 0; channel < channels; channel++) {
+                sum[channel] = 0;
+            }
+
+            for (int i = 0; i < kernelSize; i++) {
+                int offsetX = i - kernelRadius;
+                int inputOffset = calcOffsetWithClamp(width, height, x + offsetX, y);
+
+                for (int channel = 0; channel < channels; channel++) {
+                    sum[channel] += inputImage[inputOffset + channel] * kernel[i];
+                }
+            }
+
+            uchar* output = outputImage + calcOffset(width, height, x, y);
+            for (int channel = 0; channel < channels; channel++) {
+                output[channel] = round(sum[channel]);
+            }
+        }
+    }
 }
 
 // void meanColor(uchar *image, int width, int height) {
@@ -187,7 +198,8 @@ void convolutionX(const uchar *inputImage, uchar *outputImage, int width,
 //   for (int y = 0; y < height; y++) {
 //     for (int x = 0; x < width; x++) {
 //       for (int channel = 0; channel < channels; channel++) {
-//         meanColor[channel] += image[calcOffset(width, height, x, y) + channel];
+//         meanColor[channel] += image[calcOffset(width, height, x, y) +
+//         channel];
 //       }
 //     }
 //   }
@@ -197,107 +209,101 @@ void convolutionX(const uchar *inputImage, uchar *outputImage, int width,
 //   }
 // }
 
-void gaussianBlur(uchar *image, int width, int height, double sigma) {
-  // Calculate kernel size based on sigma
-  int kernelSize = 31;
+void gaussianBlur(uchar* image, int width, int height, double sigma)
+{
+    // Calculate kernel size based on sigma
+    int kernelSize = 31;
 
-  printf("Kernel size: %d\n", kernelSize);
-  // Allocate memory for the kernel
-  float *kernel = (float *)malloc(kernelSize * sizeof(float));
+    printf("Kernel size: %d\n", kernelSize);
+    // Allocate memory for the kernel
+    float* kernel = (float*)malloc(kernelSize * sizeof(float));
 
-  // Fill the 1D Gaussian kernel
-  fill1DGaussianKernel(kernel, kernelSize, sigma);
+    // Fill the 1D Gaussian kernel
+    fill1DGaussianKernel(kernel, kernelSize, sigma);
 
-  uchar *temp = (uchar *)malloc(width * height * CHANNELS * sizeof(uchar));
+    uchar* temp = (uchar*)malloc(width * height * CHANNELS * sizeof(uchar));
 
-  // meanColor(image, width, height);
+    // meanColor(image, width, height);
 
-  printf("ConvolutionX...size[%d, %d], kernel size %d\n", width, height,
-         kernelSize);
-  // Apply Gaussian blur horizontally
-  convolutionX(image, temp, width, height, kernel, kernelSize);
+    printf("ConvolutionX...size[%d, %d], kernel size %d\n", width, height, kernelSize);
+    // Apply Gaussian blur horizontally
+    convolutionX(image, temp, width, height, kernel, kernelSize);
 
-  // meanColor(temp, width, height);
+    // meanColor(temp, width, height);
 
-  printf("ConvolutionY...size[%d, %d], kernel size %d\n", width, height,
-         kernelSize);
-  // Apply Gaussian blur vertically
-  convolutionY(temp, image, width, height, kernel, kernelSize);
+    printf("ConvolutionY...size[%d, %d], kernel size %d\n", width, height, kernelSize);
+    // Apply Gaussian blur vertically
+    convolutionY(temp, image, width, height, kernel, kernelSize);
 
-  // meanColor(image, width, height);
+    // meanColor(image, width, height);
 
-  printf("Convolution...Done\n");
+    printf("Convolution...Done\n");
 
-  // Free memory
-  free(kernel);
-  free(temp);
+    // Free memory
+    free(kernel);
+    free(temp);
 }
 
-void processImage(const char *inputPath, const char *outputPath, float sigma) {
-  // Load image using stb_image
-  int origWidth, origHeight, channels;
-  uchar *image =
-      stbi_load(inputPath, &origWidth, &origHeight, &channels, CHANNELS);
-  if (image == NULL) {
-    printf("Failed to load image: %s\n", inputPath);
-    return;
-  }
-  printf("Loaded image: %s, image size: %dx%d, channels: %d\n", inputPath,
-         origWidth, origHeight, channels);
+void processImage(const char* inputPath, const char* outputPath, float sigma)
+{
+    // Load image using stb_image
+    int origWidth, origHeight, channels;
+    uchar* image = stbi_load(inputPath, &origWidth, &origHeight, &channels, CHANNELS);
+    if (image == NULL) {
+        printf("Failed to load image: %s\n", inputPath);
+        return;
+    }
+    printf("Loaded image: %s, image size: %dx%d, channels: %d\n", inputPath, origWidth, origHeight, channels);
 
-  // Apply Gaussian blur iteratively
-  int width = origWidth;
-  int height = origHeight;
-  while (sigma > 4.0 && width >= 2 && height >= 2) {
-    // Resize image using bilinear interpolation
-    int newWidth = width / 2;
-    int newHeight = height / 2;
-    printf("Resizing image from %dx%d to %dx%d\n", width, height, newWidth,
-           newHeight);
-    uchar *resizedImage =
-        bilinearInterpolation(image, width, height, newWidth, newHeight);
-    free(image);
-    image = resizedImage;
-    width = newWidth;
-    height = newHeight;
-    sigma = sigma / 2.0;
+    // Apply Gaussian blur iteratively
+    int width = origWidth;
+    int height = origHeight;
+    while (sigma > 4.0 && width >= 2 && height >= 2) {
+        // Resize image using bilinear interpolation
+        int newWidth = width / 2;
+        int newHeight = height / 2;
+        printf("Resizing image from %dx%d to %dx%d\n", width, height, newWidth, newHeight);
+        uchar* resizedImage = bilinearInterpolation(image, width, height, newWidth, newHeight);
+        free(image);
+        image = resizedImage;
+        width = newWidth;
+        height = newHeight;
+        sigma = sigma / 2.0;
 
-    // Save the resized image
-    // filename = "output + sigma + .png"
+        // Save the resized image
+        // filename = "output + sigma + .png"
+        char filename[1024];
+        snprintf(filename, 1024, "%s_sigma_%g.png", outputPath, sigma);
+        stbi_write_png(filename, width, height, CHANNELS, image, width * CHANNELS);
+    }
+
+    // Apply Gaussian blur
+    gaussianBlur(image, width, height, sigma);
+
     char filename[1024];
-    snprintf(filename, 1024, "%s_sigma_%g.png", outputPath, sigma);
+    snprintf(filename, 1024, "%s_%g_blurred.png", outputPath, sigma);
     stbi_write_png(filename, width, height, CHANNELS, image, width * CHANNELS);
-  }
 
-  // Apply Gaussian blur
-  gaussianBlur(image, width, height, sigma);
+    printf("Resizing image from %dx%d to %dx%d\n", width, height, origWidth, origHeight);
+    // Upscale the blurred image
+    uchar* outputImage = bilinearInterpolation(image, width, height, origWidth, origHeight);
+    free(image);
 
-  char filename[1024];
-  snprintf(filename, 1024, "%s_%g_blurred.png", outputPath, sigma);
-  stbi_write_png(filename, width, height, CHANNELS, image, width * CHANNELS);
+    printf("Saving image to %s\n", outputPath);
+    // Save the final result
+    stbi_write_png(outputPath, origWidth, origHeight, CHANNELS, outputImage, origWidth * CHANNELS);
 
-  printf("Resizing image from %dx%d to %dx%d\n", width, height, origWidth,
-         origHeight);
-  // Upscale the blurred image
-  uchar *outputImage =
-      bilinearInterpolation(image, width, height, origWidth, origHeight);
-  free(image);
-
-  printf("Saving image to %s\n", outputPath);
-  // Save the final result
-  stbi_write_png(outputPath, origWidth, origHeight, CHANNELS, outputImage,
-                 origWidth * CHANNELS);
-
-  // Free memory
-  free(outputImage);
+    // Free memory
+    free(outputImage);
 }
 
-int main() {
-  const char *inputPath = "../input.png";
-  const char *outputPath = "output.png";
-  float sigma = 80.0f;
+int main()
+{
+    const char* inputPath = "../input.png";
+    const char* outputPath = "output.png";
+    float sigma = 80.0f;
 
-  processImage(inputPath, outputPath, sigma);
+    processImage(inputPath, outputPath, sigma);
 
-  return 0;
+    return 0;
 }
